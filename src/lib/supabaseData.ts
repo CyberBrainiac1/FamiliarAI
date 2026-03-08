@@ -58,13 +58,14 @@ export const fetchPeopleMetByUser = async (userId: string, limit = 500) => {
   };
 };
 
-export const fetchInteractions = async (limit = 500) => {
+export const fetchInteractionsByUser = async (userId: string, limit = 500) => {
   const client = getClient();
   if (!client) return withMissingClient<DataRow[] | null>(null);
 
   const { data, error } = await client
     .from(dataTableNames.interactions)
     .select('*')
+    .eq('user_id', userId)
     .order('met_at', { ascending: false })
     .limit(limit);
 
@@ -74,13 +75,14 @@ export const fetchInteractions = async (limit = 500) => {
   };
 };
 
-export const fetchCards = async (limit = 500) => {
+export const fetchCardsByUser = async (userId: string, limit = 500) => {
   const client = getClient();
   if (!client) return withMissingClient<DataRow[] | null>(null);
 
   const { data, error } = await client
     .from(dataTableNames.cards)
     .select('*')
+    .eq('user_id', userId)
     .order('last_met', { ascending: false })
     .limit(limit);
 
@@ -116,14 +118,15 @@ export const saveLabeledPerson = async ({
   };
 };
 
-export const deleteLabeledPersonById = async (personId: string) => {
+export const deleteLabeledPersonById = async (personId: string, userId: string) => {
   const client = getClient();
   if (!client) return withMissingClient<DataRow | null>(null);
 
   const { error } = await client
     .from(dataTableNames.peopleMet)
     .delete()
-    .eq('id', personId);
+    .eq('id', personId)
+    .eq('user_id', userId);
 
   return {
     data: null,

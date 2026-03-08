@@ -4,7 +4,7 @@ import Card from '../components/ui/Card';
 import {
   dataTableNames,
   deleteLabeledPersonById,
-  fetchCards,
+  fetchCardsByUser,
   fetchPeopleMetByUser,
   isDataSupabaseConfigured,
   saveLabeledPerson,
@@ -178,7 +178,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onSignOut }) => {
       return next;
     });
 
-    const { error } = await deleteLabeledPersonById(person.id);
+    const { error } = await deleteLabeledPersonById(person.id, user.id);
     if (error) {
       setPeopleData(previousPeople);
       if (wasFavorite) {
@@ -259,7 +259,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onSignOut }) => {
     try {
       const [peopleRes, cardsRes] = await Promise.all([
         fetchPeopleMetByUser(user.id),
-        fetchCards(),
+        fetchCardsByUser(user.id),
       ]);
 
       const errors: string[] = [];
