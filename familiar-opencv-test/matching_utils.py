@@ -33,16 +33,16 @@ def _is_valid_embedding(candidate: object) -> bool:
 
 def choose_best_match(
     query_embedding: Iterable[float],
-    stored_people: list[dict],
+    stored_records: list[dict],
     threshold: float,
     metric: str = "cosine",
-    embedding_key: str = "primary_embedding",
+    embedding_key: str = "embedding",
 ) -> Optional[dict]:
-    best_person = None
+    best_record = None
     best_score = None
 
-    for person in stored_people:
-        candidate_embedding = person.get(embedding_key)
+    for record in stored_records:
+        candidate_embedding = record.get(embedding_key)
         if not _is_valid_embedding(candidate_embedding):
             continue
 
@@ -60,14 +60,14 @@ def choose_best_match(
 
         if is_better:
             best_score = score
-            best_person = person
+            best_record = record
 
-    if best_person is None or best_score is None:
+    if best_record is None or best_score is None:
         return None
 
     matched = best_score >= threshold if metric == "cosine" else best_score <= threshold
     return {
-        "person": best_person,
+        "record": best_record,
         "score": float(best_score),
         "matched": matched,
         "metric": metric,

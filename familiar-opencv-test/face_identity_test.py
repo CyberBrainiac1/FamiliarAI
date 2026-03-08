@@ -1,23 +1,31 @@
 import base64
+import binascii
+import hashlib
 import time
 from datetime import datetime, timezone
 
 import cv2
-import face_recognition
+import numpy as np
 import requests
 
 from matching_utils import choose_best_match
 
-SUPABASE_PEOPLE_URL = "https://eizrkuqdqkeplksujdvq.supabase.co/rest/v1/people"
-SUPABASE_EVENTS_URL = "https://eizrkuqdqkeplksujdvq.supabase.co/rest/v1/recognition_events"
-SUPABASE_KEY = "sb_publishable_PVlS09dpLqOVyQemVpu84Q_ChlDMxSQ"
+try:
+    import face_recognition
+    FACE_RECOGNITION_AVAILABLE = True
+except ImportError:
+    face_recognition = None
+    FACE_RECOGNITION_AVAILABLE = False
 
-DEVICE_ID = "familiar-laptop-01"
+SUPABASE_URL = "https://pkpmvrjbtftufuyymofy.supabase.co/rest/v1/Cards"
+SUPABASE_KEY = "sb_publishable_z-tQJFTDfYdP8y4LSO02wA_ID4mYjTY"
+
 CAMERA_INDEX = 0
 COOLDOWN_SECONDS = 5
 JPEG_QUALITY = 90
-MATCH_METRIC = "cosine"
 MATCH_THRESHOLD = 0.80
+MATCH_METRIC = "cosine"
+DEFAULT_RELATION = "unknown"
 
 
 def build_headers(include_json=False, return_representation=False):
@@ -43,13 +51,15 @@ def encode_crop_to_base64(face_crop):
     return base64.b64encode(buffer.tobytes()).decode("utf-8")
 
 
-def compute_face_embedding(face_crop):
-    rgb = cv2.cvtColor(face_crop, cv2.COLOR_BGR2RGB)
+def compute_face_embedding(face_bgr):
+    if not FACE_RECOGNITION_AVAILABLE:
+        return None
+
+    rgb = cv2.cvtColor(face_bgr, cv2.COLOR_BGR2RGB)
     height, width = rgb.shape[:2]
     if min(height, width) < 60:
         return None
 
-    # Crop is already just the selected face, so use one full-image location.
     known_location = [(0, width, height, 0)]
     encodings = face_recognition.face_encodings(
         rgb,
@@ -58,32 +68,68 @@ def compute_face_embedding(face_crop):
         model="small",
     )
     if not encodings:
+        encodings = face_recognition.face_encodings(rgb, num_jitters=1, model="small")
+    if not encodings:
         return None
     return encodings[0].tolist()
 
 
-def fetch_people():
+def decode_image_to_bgr(image_value):
+    if not image_value:
+        return None
+
+    raw = image_value.strip()
+    if raw.startswith("data:"):
+        parts = raw.split(",", 1)
+        if len(parts) != 2:
+            return None
+        raw = parts[1]
+
+    try:
+        image_bytes = base64.b64decode(raw, validate=True)
+    except (binascii.Error, ValueError):
+        return None
+
+    image_array = np.frombuffer(image_bytes, dtype=np.uint8)
+    return cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+
+
+def fetch_cards():
     params = {
-        "select": "id,display_name,primary_embedding,created_at",
+        "select": 'id,Name,Relation,Image,"Last Met"',
         "order": "id.asc",
     }
     response = requests.get(
-        SUPABASE_PEOPLE_URL,
+        SUPABASE_URL,
         headers=build_headers(),
         params=params,
         timeout=20,
     )
     response.raise_for_status()
-    return response.json()
+    rows = response.json()
+    cards = []
+    for row in rows:
+        cards.append(
+            {
+                "id": row.get("id"),
+                "name": row.get("Name"),
+                "relation": row.get("Relation"),
+                "image": row.get("Image"),
+                "last met": row.get("Last Met"),
+            }
+        )
+    return cards
 
 
-def create_person(primary_embedding, preview_image_base64):
+def create_card(image_base64):
     payload = {
-        "primary_embedding": primary_embedding,
-        "preview_image_base64": preview_image_base64,
+        "Name": f"Unknown {int(time.time())}",
+        "Relation": DEFAULT_RELATION,
+        "Image": image_base64,
+        "Last Met": datetime.now(timezone.utc).strftime("%H:%M:%S"),
     }
     response = requests.post(
-        SUPABASE_PEOPLE_URL,
+        SUPABASE_URL,
         headers=build_headers(include_json=True, return_representation=True),
         json=payload,
         timeout=20,
@@ -91,30 +137,61 @@ def create_person(primary_embedding, preview_image_base64):
     response.raise_for_status()
     rows = response.json()
     if not rows:
-        raise RuntimeError("Person insert returned no row")
+        raise RuntimeError("Card insert returned no row")
     return rows[0]
 
 
-def create_recognition_event(image_base64, embedding, person_id, match_score):
+def update_card(card_id, image_base64):
     payload = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "device_id": DEVICE_ID,
-        "image_base64": image_base64,
-        "embedding": embedding,
-        "person_id": person_id,
-        "match_score": match_score,
+        "Image": image_base64,
+        "Last Met": datetime.now(timezone.utc).strftime("%H:%M:%S"),
     }
-    response = requests.post(
-        SUPABASE_EVENTS_URL,
-        headers=build_headers(include_json=True, return_representation=True),
+    response = requests.patch(
+        SUPABASE_URL,
+        headers=build_headers(include_json=True),
+        params={"id": f"eq.{card_id}"},
         json=payload,
         timeout=20,
     )
     response.raise_for_status()
-    rows = response.json()
-    if not rows:
-        raise RuntimeError("Event insert returned no row")
-    return rows[0]
+
+
+def get_card_embedding(card, embedding_cache):
+    if not FACE_RECOGNITION_AVAILABLE:
+        return None
+
+    card_id = card.get("id")
+    image_value = card.get("image")
+    if card_id is None or not image_value:
+        return None
+
+    fingerprint = hashlib.sha1(image_value.encode("utf-8")).hexdigest()
+    cached = embedding_cache.get(card_id)
+    if cached and cached["fingerprint"] == fingerprint:
+        return cached["embedding"]
+
+    image_bgr = decode_image_to_bgr(image_value)
+    if image_bgr is None:
+        return None
+
+    embedding = compute_face_embedding(image_bgr)
+    if embedding is None:
+        return None
+
+    embedding_cache[card_id] = {"fingerprint": fingerprint, "embedding": embedding}
+    return embedding
+
+
+def build_candidate_cards(cards, embedding_cache):
+    candidates = []
+    for card in cards:
+        embedding = get_card_embedding(card, embedding_cache)
+        if embedding is None:
+            continue
+        candidate = dict(card)
+        candidate["embedding"] = embedding
+        candidates.append(candidate)
+    return candidates
 
 
 def expand_face_box(x, y, w, h, frame_width, frame_height, margin_ratio=0.15):
@@ -139,14 +216,6 @@ def draw_label(frame, text, x, y, color):
     cv2.putText(frame, text, (x + 5, box_bottom - baseline - 2), font, scale, color, thickness)
 
 
-def build_identity_label(person, score):
-    person_id = person.get("id")
-    display_name = person.get("display_name")
-    if display_name:
-        return f"Name: {display_name} ({score:.2f})"
-    return f"Person ID: {person_id} ({score:.2f})"
-
-
 def main():
     cap = cv2.VideoCapture(CAMERA_INDEX)
     if not cap.isOpened():
@@ -159,12 +228,14 @@ def main():
         cap.release()
         raise SystemExit("Could not load face cascade")
 
+    embedding_cache = {}
     last_sent_time = 0.0
-    active_label = "Face detected - waiting for recognition"
+    active_label = "Face detected - waiting"
     active_color = (0, 255, 255)
 
-    print("Running same-person recognition test. Press q to quit.")
-    print(f"Metric: {MATCH_METRIC}, Threshold: {MATCH_THRESHOLD}")
+    print("Running cards identity test. Press q to quit.")
+    if not FACE_RECOGNITION_AVAILABLE:
+        print("face_recognition not installed -> matching disabled, insert-only mode.")
 
     while True:
         ok, frame = cap.read()
@@ -179,10 +250,8 @@ def main():
             minSize=(60, 60),
         )
 
-        best_face = None
         if len(faces) > 0:
-            best_face = max(faces, key=lambda f: f[2] * f[3])
-            x, y, w, h = best_face
+            x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
             frame_h, frame_w = frame.shape[:2]
             left, top, right, bottom = expand_face_box(x, y, w, h, frame_w, frame_h)
             face_crop = frame[top:bottom, left:right]
@@ -190,57 +259,45 @@ def main():
             now = time.time()
             if now - last_sent_time >= COOLDOWN_SECONDS:
                 try:
-                    embedding = compute_face_embedding(face_crop)
-                    if embedding is None:
-                        active_label = "Embedding failed"
+                    image_base64 = encode_crop_to_base64(face_crop)
+                    if not image_base64:
+                        active_label = "Image encode failed"
                         active_color = (0, 0, 255)
-                        print("No embedding returned for selected face")
+                    elif not FACE_RECOGNITION_AVAILABLE:
+                        new_card = create_card(image_base64)
+                        active_label = f"New Card: {new_card.get('id')}"
+                        active_color = (0, 200, 255)
                     else:
-                        face_base64 = encode_crop_to_base64(face_crop)
-                        if not face_base64:
-                            active_label = "Image encode failed"
-                            active_color = (0, 0, 255)
-                            print("Failed to encode selected face crop")
+                        live_embedding = compute_face_embedding(face_crop)
+                        if live_embedding is None:
+                            new_card = create_card(image_base64)
+                            active_label = f"New Card: {new_card.get('id')}"
+                            active_color = (0, 200, 255)
                         else:
-                            people = fetch_people()
+                            cards = fetch_cards()
+                            candidates = build_candidate_cards(cards, embedding_cache)
                             match = choose_best_match(
-                                query_embedding=embedding,
-                                stored_people=people,
+                                query_embedding=live_embedding,
+                                stored_records=candidates,
                                 threshold=MATCH_THRESHOLD,
                                 metric=MATCH_METRIC,
+                                embedding_key="embedding",
                             )
 
                             if match and match["matched"]:
-                                person = match["person"]
+                                matched_card = match["record"]
                                 score = float(match["score"])
-                                person_id = person.get("id")
-                                create_recognition_event(
-                                    image_base64=face_base64,
-                                    embedding=embedding,
-                                    person_id=person_id,
-                                    match_score=score,
-                                )
-                                active_label = build_identity_label(person, score)
+                                update_card(matched_card["id"], image_base64)
+                                card_name = matched_card.get("name")
+                                if card_name:
+                                    active_label = f"Name: {card_name} ({score:.2f})"
+                                else:
+                                    active_label = f"Card ID: {matched_card.get('id')} ({score:.2f})"
                                 active_color = (0, 255, 0)
-                                print(
-                                    f"Matched existing person_id={person_id} "
-                                    f"score={score:.3f}"
-                                )
                             else:
-                                new_person = create_person(
-                                    primary_embedding=embedding,
-                                    preview_image_base64=face_base64,
-                                )
-                                new_person_id = new_person.get("id")
-                                create_recognition_event(
-                                    image_base64=face_base64,
-                                    embedding=embedding,
-                                    person_id=new_person_id,
-                                    match_score=None,
-                                )
-                                active_label = f"New Person: {new_person_id}"
+                                new_card = create_card(image_base64)
+                                active_label = f"New Card: {new_card.get('id')}"
                                 active_color = (0, 200, 255)
-                                print(f"Created new person_id={new_person_id}")
 
                     last_sent_time = now
                 except requests.RequestException as exc:
@@ -249,7 +306,7 @@ def main():
                     print(f"Supabase request failed: {exc}")
                     last_sent_time = now
                 except Exception as exc:
-                    active_label = "Recognition error"
+                    active_label = "Identity flow error"
                     active_color = (0, 0, 255)
                     print(f"Unexpected error: {exc}")
                     last_sent_time = now

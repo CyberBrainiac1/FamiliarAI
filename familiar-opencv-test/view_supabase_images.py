@@ -4,8 +4,8 @@ import binascii
 import requests
 from flask import Flask, render_template
 
-SUPABASE_REST_URL = "https://eizrkuqdqkeplksujdvq.supabase.co/rest/v1/recognition_events"
-SUPABASE_KEY = "sb_publishable_PVlS09dpLqOVyQemVpu84Q_ChlDMxSQ"
+SUPABASE_URL = "https://pkpmvrjbtftufuyymofy.supabase.co/rest/v1/Cards"
+SUPABASE_KEY = "sb_publishable_z-tQJFTDfYdP8y4LSO02wA_ID4mYjTY"
 
 app = Flask(__name__)
 
@@ -24,19 +24,19 @@ def detect_mime_type(image_bytes):
     return None
 
 
-def base64_to_data_url(image_base64):
-    if not image_base64:
-        return None, "Missing image_base64 value"
+def image_to_data_url(value):
+    if not value:
+        return None, "Missing image value"
 
-    raw_value = image_base64.strip()
-    if raw_value.startswith("data:"):
-        parts = raw_value.split(",", 1)
+    raw = value.strip()
+    if raw.startswith("data:"):
+        parts = raw.split(",", 1)
         if len(parts) != 2:
             return None, "Invalid data URL format"
-        raw_value = parts[1]
+        raw = parts[1]
 
     try:
-        image_bytes = base64.b64decode(raw_value, validate=True)
+        image_bytes = base64.b64decode(raw, validate=True)
     except (binascii.Error, ValueError):
         return None, "Invalid base64 image data"
 
@@ -48,50 +48,50 @@ def base64_to_data_url(image_base64):
     return f"data:{mime_type};base64,{normalized_b64}", None
 
 
-def fetch_events():
+def fetch_cards():
     headers = {
         "apikey": SUPABASE_KEY,
         "Authorization": f"Bearer {SUPABASE_KEY}",
     }
     params = {
-        "select": "id,timestamp,device_id,image_base64,embedding,created_at",
-        "order": "created_at.desc",
+        "select": 'id,Name,Relation,Image,"Last Met"',
+        "order": "id.desc",
+        "limit": "100",
     }
 
-    response = requests.get(SUPABASE_REST_URL, headers=headers, params=params, timeout=20)
+    response = requests.get(SUPABASE_URL, headers=headers, params=params, timeout=20)
     response.raise_for_status()
     rows = response.json()
 
-    events = []
+    cards = []
     for row in rows:
-        image_data_url, image_error = base64_to_data_url(row.get("image_base64", ""))
-        events.append(
+        image_data_url, image_error = image_to_data_url(row.get("Image", ""))
+        cards.append(
             {
                 "id": row.get("id"),
-                "timestamp": row.get("timestamp"),
-                "device_id": row.get("device_id"),
-                "created_at": row.get("created_at"),
-                "embedding": row.get("embedding"),
+                "name": row.get("Name"),
+                "relation": row.get("Relation"),
+                "last_met": row.get("Last Met"),
                 "image_data_url": image_data_url,
                 "image_error": image_error,
             }
         )
-    return events
+    return cards
 
 
 @app.route("/")
 def index():
-    events = []
+    cards = []
     error_message = None
 
     try:
-        events = fetch_events()
+        cards = fetch_cards()
     except requests.RequestException as exc:
         error_message = f"Supabase request failed: {exc}"
     except ValueError as exc:
         error_message = f"Invalid Supabase response: {exc}"
 
-    return render_template("index.html", events=events, error_message=error_message)
+    return render_template("index.html", cards=cards, error_message=error_message)
 
 
 if __name__ == "__main__":

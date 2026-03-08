@@ -1,119 +1,70 @@
-# Familiar OpenCV + Supabase Identity MVP
+# Familiar OpenCV + Supabase Cards MVP
 
-This folder contains a hackathon-friendly same-person recognition pipeline.
+This project is wired to the new Supabase project and the capitalized table/column schema:
 
-It keeps the local webcam flow and adds real face embeddings so the same person can be recognized across multiple frames.
+- Table: `Cards`
+- Columns: `id`, `Name`, `Relation`, `Image`, `Last Met`
 
-## What changed
+## Supabase config
 
-- Added `people` identity table SQL and `recognition_events` updates in `db_schema.sql`.
-- Added embedding/matching helpers in `matching_utils.py`.
-- Added `face_identity_test.py` for webcam detection + embedding + match/create identity + event insert.
-- Updated viewer (`view_supabase_images.py` and `templates/index.html`) to show:
-  - `person_id`
-  - `match_score`
-  - new vs matched identity status
-  - `display_name` when present
-  - grouped events by person
-- Kept `face_detect_test.py` as a simpler baseline uploader.
+- Project URL: `https://pkpmvrjbtftufuyymofy.supabase.co`
+- REST table URL used in scripts: `https://pkpmvrjbtftufuyymofy.supabase.co/rest/v1/Cards`
+- Publishable key: `sb_publishable_z-tQJFTDfYdP8y4LSO02wA_ID4mYjTY`
 
-## How same-person recognition works
+## What each script does
 
-1. Open webcam and detect faces with OpenCV Haar cascade.
-2. Choose the largest face in frame.
-3. Generate a real face embedding using `face_recognition` (128D).
-4. Pull all `people` rows from Supabase.
-5. Compare current embedding to stored `primary_embedding` vectors.
-6. If best score passes threshold, reuse that `person_id`.
-7. If no score passes threshold, create a new `people` row.
-8. Insert a `recognition_events` row with `person_id`, `match_score`, and image.
-9. Show identity label directly on webcam preview.
+- `supabase_rest_test.py`
+  - Sends one test insert into `Cards`.
+- `face_detect_test.py`
+  - Uses webcam + OpenCV face detection.
+  - Crops the largest face and inserts a new row into `Cards`.
+- `face_identity_test.py`
+  - Keeps optional same-person matching support.
+  - If `face_recognition` is available, it tries to match against existing card images.
+  - If not available (or no match), it inserts a new card.
+- `view_supabase_images.py`
+  - Reads from `Cards` and renders:
+    - `id`
+    - `Name`
+    - `Relation`
+    - `Last Met`
+    - image preview from `Image`
 
-## Current matching config
-
-- Metric: cosine similarity
-- Threshold: `0.80`
-- Cooldown: `5` seconds
-
-These are constants in `face_identity_test.py`.
-
-## Limitations (expected for MVP)
-
-- One primary embedding per person. This can split identities with major lighting/angle changes.
-- Haar detection is basic and can miss side profiles.
-- Matching runs against all people rows each cooldown cycle (fine for small hackathon scale).
-- RLS policies in `db_schema.sql` are intentionally open for testing and are not production-safe.
-
-## 1) Run schema setup in Supabase SQL Editor
-
-Open Supabase dashboard -> SQL Editor -> paste and run `db_schema.sql`.
-
-This creates/updates:
-
-- `people`
-- `recognition_events.person_id`
-- `recognition_events.match_score`
-- simple hackathon RLS policies for select/insert/update with publishable key
-
-## 2) Install Python dependencies
-
-From this folder:
+## Install
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## 3) Configure key
+## Run insert test
 
-Set your publishable key in:
-
-- `face_identity_test.py`
-- `view_supabase_images.py`
-- `supabase_rest_test.py`
-- `face_detect_test.py` (if you still use baseline uploader)
-
-Replace:
-
-```python
-SUPABASE_KEY = "PASTE_YOUR_PUBLISHABLE_KEY_HERE"
+```bash
+python supabase_rest_test.py
 ```
 
-## 4) Run same-person identity test
+## Run webcam uploader
+
+```bash
+python face_detect_test.py
+```
+
+## Run identity flow
 
 ```bash
 python face_identity_test.py
 ```
 
-Preview labels:
-
-- Matched with name: `Name: <display_name> (<score>)`
-- Matched without name: `Person ID: <person_id> (<score>)`
-- New identity: `New Person: <person_id>`
-
-## 5) Run viewer
+## Run viewer
 
 ```bash
 python view_supabase_images.py
 ```
 
-Open:
+Open: `http://127.0.0.1:5000`
 
-`http://127.0.0.1:5000`
+## Limitations with current cards-only schema
 
-You will see events grouped by person and labeled as matched/new.
-
-## Threshold tuning guide
-
-Tune `MATCH_THRESHOLD` in `face_identity_test.py`.
-
-- If different people are being merged together:
-  - increase threshold (for cosine, e.g. `0.80 -> 0.85`)
-- If the same person keeps getting split into new identities:
-  - decrease threshold (for cosine, e.g. `0.80 -> 0.75`)
-
-Recommended quick test loop:
-
-1. Start at `0.80`
-2. Capture same person in different angles/light
-3. Capture a clearly different person
-4. Adjust by `0.02` to `0.05` until behavior is acceptable
+- `Cards` has no dedicated embedding columns.
+- Matching in `face_identity_test.py` is simplified:
+  - it derives embeddings from stored `Image` values on the fly.
+- For stronger/faster matching, add explicit embedding columns later.

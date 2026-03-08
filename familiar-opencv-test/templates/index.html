@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Recognition Events Viewer</title>
+  <title>Cards Viewer</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -34,6 +34,11 @@
       padding: 12px;
       box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
     }
+    .name {
+      margin: 0 0 8px 0;
+      font-size: 20px;
+      line-height: 1.2;
+    }
     .meta {
       font-size: 14px;
       margin-bottom: 8px;
@@ -62,35 +67,36 @@
   </style>
 </head>
 <body>
-  <h1>Recognition Events</h1>
+  <h1>Cards</h1>
 
   {% if error_message %}
     <div class="error">{{ error_message }}</div>
   {% endif %}
 
-  {% if events %}
+  {% if cards %}
     <div class="grid">
-      {% for event in events %}
+      {% for card in cards %}
         <div class="card">
+          <h2 class="name">{{ card.name or "Unknown" }}</h2>
+
           <div class="meta">
-            <div><strong>ID:</strong> {{ event.id }}</div>
-            <div><strong>Device:</strong> {{ event.device_id or "N/A" }}</div>
-            <div><strong>Timestamp:</strong> {{ event.timestamp or "N/A" }}</div>
-            <div><strong>Created:</strong> {{ event.created_at or "N/A" }}</div>
+            <div><strong>ID:</strong> {{ card.id }}</div>
+            <div><strong>Relation:</strong> {{ card.relation or "Unknown" }}</div>
+            <div><strong>Last met:</strong> {{ card.last_met or "N/A" }}</div>
           </div>
 
-          {% if event.image_data_url %}
-            <img src="{{ event.image_data_url }}" alt="Recognition event image {{ event.id }}">
+          {% if card.image_data_url %}
+            <img src="{{ card.image_data_url }}" alt="Card image {{ card.id }}">
           {% else %}
             <div class="placeholder">
-              Image unavailable: {{ event.image_error or "Missing or invalid image data" }}
+              Image unavailable: {{ card.image_error or "Missing or invalid image data" }}
             </div>
           {% endif %}
         </div>
       {% endfor %}
     </div>
   {% else %}
-    <div class="empty">No rows found in recognition_events.</div>
+    <div class="empty">No rows found in cards.</div>
   {% endif %}
 </body>
 </html>

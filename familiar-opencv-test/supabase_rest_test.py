@@ -1,7 +1,7 @@
 import requests
 
-SUPABASE_REST_URL = "https://eizrkuqdqkeplksujdvq.supabase.co/rest/v1/recognition_events"
-SUPABASE_KEY = "sb_publishable_PVlS09dpLqOVyQemVpu84Q_ChlDMxSQ"
+SUPABASE_URL = "https://pkpmvrjbtftufuyymofy.supabase.co/rest/v1/Cards"
+SUPABASE_KEY = "sb_publishable_z-tQJFTDfYdP8y4LSO02wA_ID4mYjTY"
 
 headers = {
     "apikey": SUPABASE_KEY,
@@ -11,15 +11,13 @@ headers = {
 }
 
 payload = {
-    "timestamp": "2026-03-08T12:00:00Z",
-    "device_id": "familiar-laptop-01",
-    "image_base64": "base64stringhere",
-    "embedding": [0.1, 0.2, 0.3],
-    "person_id": None,
-    "match_score": None,
+    "Name": "John",
+    "Relation": "neighbor",
+    "Image": "base64stringhere",
+    "Last Met": "12:00:00",
 }
 
-response = requests.post(SUPABASE_REST_URL, headers=headers, json=payload, timeout=15)
+response = requests.post(SUPABASE_URL, headers=headers, json=payload, timeout=15)
 
 print("Status code:", response.status_code)
 print("Response text:", response.text)
