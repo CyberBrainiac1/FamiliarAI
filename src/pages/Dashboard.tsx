@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { User } from '@supabase/supabase-js';
 import Card from '../components/ui/Card';
+import { dataSupabase, isDataSupabaseConfigured } from '../lib/supabaseData';
 
 type TimeFilter = '24h' | 'week' | 'month' | 'year' | 'all';
 type StatusFilter = 'all' | 'recognized' | 'unknown' | 'labeled';
@@ -17,6 +18,7 @@ interface Person {
   id: string;
   name: string;
   relationship: string;
+  pictureUrl?: string;
   lastSeenHoursAgo: number;
   seenCount: number;
   note?: string;
@@ -35,7 +37,7 @@ interface Interaction {
 interface Alert {
   id: string;
   timestampHoursAgo: number;
-  snapshot: string;
+  imageUrl: string;
   status: 'pending';
 }
 
@@ -47,32 +49,39 @@ const HOURS = {
   all: Number.POSITIVE_INFINITY,
 } as const;
 
-const peopleSeed: Person[] = [
-  { id: 'p1', name: 'Anita Rao', relationship: 'Daughter', lastSeenHoursAgo: 2, seenCount: 43, note: 'Visits every evening.', avatar: 'AR' },
-  { id: 'p2', name: 'Michael Chen', relationship: 'Son', lastSeenHoursAgo: 26, seenCount: 31, note: 'Calls often, visits weekends.', avatar: 'MC' },
-  { id: 'p3', name: 'Rosa Patel', relationship: 'Caregiver', lastSeenHoursAgo: 5, seenCount: 58, note: 'Morning routine support.', avatar: 'RP' },
-  { id: 'p4', name: 'David Morales', relationship: 'Neighbor', lastSeenHoursAgo: 88, seenCount: 14, note: 'Checks in midweek.', avatar: 'DM' },
-  { id: 'p5', name: 'Lila Brooks', relationship: 'Granddaughter', lastSeenHoursAgo: 12, seenCount: 19, note: 'Weekend lunch visits.', avatar: 'LB' },
-  { id: 'p6', name: 'Nina Kapoor', relationship: 'Nurse', lastSeenHoursAgo: 3, seenCount: 65, note: 'Medication reminders.', avatar: 'NK' },
-];
+const peopleSeed: Person[] = [];
+const interactionSeed: Interaction[] = [];
+const alertSeed: Alert[] = [];
 
-const interactionSeed: Interaction[] = [
-  { id: 'i1', personId: 'p1', name: 'Anita Rao', status: 'recognized', timestampHoursAgo: 2, thumbnail: 'AR' },
-  { id: 'i2', personId: 'p6', name: 'Nina Kapoor', status: 'recognized', timestampHoursAgo: 3, thumbnail: 'NK' },
-  { id: 'i3', name: 'Unknown Person', status: 'unknown', timestampHoursAgo: 6, thumbnail: '??' },
-  { id: 'i4', personId: 'p3', name: 'Rosa Patel', status: 'labeled', timestampHoursAgo: 20, thumbnail: 'RP' },
-  { id: 'i5', personId: 'p5', name: 'Lila Brooks', status: 'recognized', timestampHoursAgo: 36, thumbnail: 'LB' },
-  { id: 'i6', name: 'Unknown Person', status: 'unknown', timestampHoursAgo: 42, thumbnail: '??' },
-  { id: 'i7', personId: 'p2', name: 'Michael Chen', status: 'recognized', timestampHoursAgo: 78, thumbnail: 'MC' },
-  { id: 'i8', personId: 'p4', name: 'David Morales', status: 'labeled', timestampHoursAgo: 116, thumbnail: 'DM' },
-];
+const CARDS_TABLE = import.meta.env.VITE_DATA_TABLE_CARDS || 'cards';
+const PEOPLE_TABLE = import.meta.env.VITE_DATA_TABLE_PEOPLE || 'people';
+const INTERACTIONS_TABLE = import.meta.env.VITE_DATA_TABLE_INTERACTIONS || 'interactions';
 
-const alertSeed: Alert[] = [
-  { id: 'a1', timestampHoursAgo: 6, snapshot: 'U1', status: 'pending' },
-  { id: 'a2', timestampHoursAgo: 30, snapshot: 'U2', status: 'pending' },
-  { id: 'a3', timestampHoursAgo: 62, snapshot: 'U3', status: 'pending' },
-  { id: 'a4', timestampHoursAgo: 126, snapshot: 'U4', status: 'pending' },
-];
+const toHoursAgo = (value: unknown, fallback: number) => {
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.max(0, value);
+  if (typeof value === 'string') {
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) {
+      const diff = (Date.now() - parsed.getTime()) / (1000 * 60 * 60);
+      return Math.max(0, diff);
+    }
+  }
+  return fallback;
+};
+
+const textOr = (value: unknown, fallback: string) => {
+  if (typeof value !== 'string') return fallback;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : fallback;
+};
+
+const toImageSrc = (value: unknown) => {
+  if (typeof value !== 'string') return '';
+  const raw = value.trim();
+  if (!raw) return '';
+  if (raw.startsWith('http://') || raw.startsWith('https://') || raw.startsWith('data:image/')) return raw;
+  return `data:image/jpeg;base64,${raw}`;
+};
 
 const timeLabel = (hoursAgo: number) => {
   if (hoursAgo < 1) return 'just now';
@@ -87,6 +96,11 @@ const statusBadgeClass = (status: InteractionStatus) => {
 };
 
 const Dashboard: React.FC<DashboardProps> = ({ user, onSignOut }) => {
+  const [peopleData, setPeopleData] = useState<Person[]>(peopleSeed);
+  const [interactionsData, setInteractionsData] = useState<Interaction[]>(interactionSeed);
+  const [alertsData, setAlertsData] = useState<Alert[]>(alertSeed);
+  const [isDataLoading, setIsDataLoading] = useState(false);
+  const [dataError, setDataError] = useState('');
   const [activeSection, setActiveSection] = useState<SectionKey>('overview');
   const [peopleTimeFilter, setPeopleTimeFilter] = useState<Exclude<TimeFilter, '24h'>>('week');
   const [peopleSort, setPeopleSort] = useState<PeopleSort>('recent');
@@ -101,55 +115,186 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onSignOut }) => {
   const [labelRelationship, setLabelRelationship] = useState('');
   const [toast, setToast] = useState('');
 
+  const saveAlertLabel = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!selectedAlert) return;
+
+    const name = labelName.trim();
+    const relation = labelRelationship.trim();
+    if (!name || !relation) return;
+
+    if (!dataSupabase || !isDataSupabaseConfigured) {
+      setToast('Second Supabase is not configured.');
+      window.setTimeout(() => setToast(''), 2400);
+      return;
+    }
+
+    const { error } = await dataSupabase
+      .from(CARDS_TABLE)
+      .update({ name, relation })
+      .eq('id', selectedAlert.id);
+
+    if (error) {
+      setToast(`Failed to save: ${error.message}`);
+      window.setTimeout(() => setToast(''), 2400);
+      return;
+    }
+
+    setToast('Details saved.');
+    setSelectedAlert(null);
+    setLabelName('');
+    setLabelRelationship('');
+    window.setTimeout(() => setToast(''), 2400);
+    await loadSecondSupabaseData();
+  };
+
+  const loadSecondSupabaseData = useCallback(async () => {
+    if (!dataSupabase || !isDataSupabaseConfigured) {
+      setDataError('Second Supabase is not configured. Add VITE_DATA_SUPABASE_URL and VITE_DATA_SUPABASE_ANON_KEY.');
+      return;
+    }
+
+    setIsDataLoading(true);
+    setDataError('');
+
+    try {
+      const [peopleRes, interactionsRes, cardsRes] = await Promise.all([
+        dataSupabase.from(PEOPLE_TABLE).select('*').order('last_met', { ascending: false }),
+        dataSupabase.from(INTERACTIONS_TABLE).select('*').order('met_at', { ascending: false }).limit(500),
+        dataSupabase.from(CARDS_TABLE).select('*').order('last_met', { ascending: false }).limit(500),
+      ]);
+
+      const errors: string[] = [];
+      let mappedPeople: Person[] = [];
+      let mappedInteractions: Interaction[] = [];
+
+      if (peopleRes.error) {
+        errors.push(`People(${PEOPLE_TABLE}): ${peopleRes.error.message}`);
+      } else {
+        mappedPeople = (peopleRes.data || []).map((row: Record<string, unknown>, index: number) => {
+          const name = textOr(row.name, 'Unknown');
+          return {
+            id: String(row.id || `p-${index}`),
+            name,
+            relationship: textOr(row.relation ?? row.relationship, 'Unknown'),
+            pictureUrl: toImageSrc(row.picture ?? row.image),
+            lastSeenHoursAgo: toHoursAgo(row.last_met ?? row.time ?? row.last_seen ?? row.created_at, 9999),
+            seenCount: Number(row.seen_count ?? row.interaction_count ?? 0),
+            note: typeof row.note === 'string' ? row.note : undefined,
+            avatar: name === 'Unknown' ? 'UN' : name.slice(0, 2).toUpperCase(),
+          };
+        });
+      }
+
+      if (interactionsRes.error) {
+        errors.push(`Interactions(${INTERACTIONS_TABLE}): ${interactionsRes.error.message}`);
+      } else {
+        mappedInteractions = (interactionsRes.data || []).map((row: Record<string, unknown>, index: number) => ({
+          id: String(row.id || `i-${index}`),
+          personId: row.person_id ? String(row.person_id) : undefined,
+          name: textOr(row.name ?? row.person_name, 'Unknown Person'),
+          status: (['recognized', 'unknown', 'labeled'].includes(String(row.status))
+            ? String(row.status)
+            : 'unknown') as InteractionStatus,
+          timestampHoursAgo: toHoursAgo(row.met_at ?? row.time ?? row.created_at ?? row.timestamp, 9999),
+          thumbnail: textOr(row.thumbnail ?? row.snapshot, '??'),
+        }));
+      }
+
+      if (cardsRes.error) {
+        errors.push(`Cards(${CARDS_TABLE}): ${cardsRes.error.message}`);
+      } else {
+        const mappedAlerts: Alert[] = (cardsRes.data || [])
+          .map((row: Record<string, unknown>, index: number) => ({
+            id: String(row.id || `a-${index}`),
+            name: textOr(row.name, ''),
+            relation: textOr(row.relation, ''),
+            imageUrl: toImageSrc(row.picture ?? row.image),
+            timestampHoursAgo: toHoursAgo(row.last_met ?? row.time ?? row.created_at, 9999),
+          }))
+          .filter((row) => !row.name || !row.relation)
+          .map((row) => ({
+            id: row.id,
+            imageUrl: row.imageUrl,
+            timestampHoursAgo: row.timestampHoursAgo,
+            status: 'pending' as const,
+          }));
+        setAlertsData(mappedAlerts);
+      }
+
+      if (mappedPeople.length) {
+        const seenCountByPersonId = mappedInteractions.reduce<Record<string, number>>((acc, item) => {
+          if (!item.personId) return acc;
+          acc[item.personId] = (acc[item.personId] || 0) + 1;
+          return acc;
+        }, {});
+
+        const peopleWithCounts = mappedPeople.map((person) => ({
+          ...person,
+          seenCount: seenCountByPersonId[person.id] || person.seenCount,
+        }));
+        setPeopleData(peopleWithCounts);
+      } else {
+        setPeopleData([]);
+      }
+
+      setInteractionsData(mappedInteractions);
+
+      if (errors.length) {
+        setDataError(errors.join(' | '));
+      }
+    } catch (error) {
+      setDataError(error instanceof Error ? error.message : 'Failed to load data from second Supabase.');
+    } finally {
+      setIsDataLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadSecondSupabaseData();
+  }, [loadSecondSupabaseData]);
+
   const filteredPeople = useMemo(() => {
     const maxHours = HOURS[peopleTimeFilter];
-    const base = peopleSeed.filter((person) => person.lastSeenHoursAgo <= maxHours);
+    const base = peopleData.filter((person) => person.lastSeenHoursAgo <= maxHours);
     const searched = topSearch
       ? base.filter((person) => `${person.name} ${person.relationship}`.toLowerCase().includes(topSearch.toLowerCase()))
       : base;
     if (peopleSort === 'recent') return [...searched].sort((a, b) => a.lastSeenHoursAgo - b.lastSeenHoursAgo);
     if (peopleSort === 'frequent') return [...searched].sort((a, b) => b.seenCount - a.seenCount);
     return [...searched].sort((a, b) => a.name.localeCompare(b.name));
-  }, [peopleSort, peopleTimeFilter, topSearch]);
+  }, [peopleData, peopleSort, peopleTimeFilter, topSearch]);
 
   const filteredInteractions = useMemo(() => {
     const maxHours = HOURS[interactionTimeFilter];
-    const byTime = interactionSeed.filter((item) => item.timestampHoursAgo <= maxHours);
+    const byTime = interactionsData.filter((item) => item.timestampHoursAgo <= maxHours);
     const byStatus =
       interactionStatusFilter === 'all'
         ? byTime
         : byTime.filter((item) => item.status === interactionStatusFilter);
     return byStatus;
-  }, [interactionStatusFilter, interactionTimeFilter]);
+  }, [interactionStatusFilter, interactionTimeFilter, interactionsData]);
 
   const filteredAlerts = useMemo(() => {
     const maxHours = alertsTimeFilter === 'today' ? 24 : alertsTimeFilter === '3days' ? 72 : 168;
-    return alertSeed.filter((alert) => alert.timestampHoursAgo <= maxHours);
-  }, [alertsTimeFilter]);
+    return alertsData.filter((alert) => alert.timestampHoursAgo <= maxHours);
+  }, [alertsData, alertsTimeFilter]);
 
   const filteredDirectory = useMemo(() => {
     const query = directoryQuery.trim().toLowerCase();
-    if (!query) return peopleSeed;
-    return peopleSeed.filter((person) =>
+    if (!query) return peopleData;
+    return peopleData.filter((person) =>
       `${person.name} ${person.relationship} ${person.note || ''}`.toLowerCase().includes(query)
     );
-  }, [directoryQuery]);
+  }, [directoryQuery, peopleData]);
 
   const stats = {
-    peopleTracked: peopleSeed.length,
-    pendingAlerts: alertSeed.length,
-    interactionsRecent: interactionSeed.filter((item) => item.timestampHoursAgo <= 24 * 7).length,
+    peopleTracked: peopleData.length,
+    pendingAlerts: alertsData.length,
+    interactionsRecent: interactionsData.filter((item) => item.timestampHoursAgo <= 24 * 7).length,
   };
 
-  const submitLabel = (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!labelName.trim() || !labelRelationship.trim()) return;
-    setToast(`Saved: ${labelName.trim()} (${labelRelationship.trim()})`);
-    setSelectedAlert(null);
-    setLabelName('');
-    setLabelRelationship('');
-    window.setTimeout(() => setToast(''), 2400);
-  };
+  const submitLabel = saveAlertLabel;
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-white text-slate-700 pb-20 md:pb-0">
@@ -188,6 +333,12 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onSignOut }) => {
             Welcome, {user.user_metadata?.full_name || user.email?.split('@')[0] || 'Caregiver'}
           </h1>
           <p className="mt-1 text-slate-600">Monitor familiar faces, unknown alerts, and recent interactions.</p>
+          {isDataLoading && (
+            <p className="mt-2 text-sm text-slate-500">Loading data from second Supabase...</p>
+          )}
+          {dataError && (
+            <p className="mt-2 text-sm text-amber-700">{dataError}</p>
+          )}
           <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <Card className="p-5">
               <p className="text-sm text-slate-500">Total People Tracked</p>
@@ -230,6 +381,11 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onSignOut }) => {
             </div>
           </div>
           <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {filteredPeople.length === 0 && (
+              <Card className="p-6 text-center md:col-span-2 xl:col-span-3">
+                <p className="text-slate-600">No people recognized yet.</p>
+              </Card>
+            )}
             {filteredPeople.map((person) => (
               <button
                 type="button"
@@ -248,12 +404,18 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onSignOut }) => {
               >
                 <Card className="feature-card p-5">
                   <div className="flex items-center gap-3">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 font-semibold text-emerald-700">
-                      {person.avatar}
+                    <div className="h-12 w-12 overflow-hidden rounded-full bg-emerald-100">
+                      {person.pictureUrl ? (
+                        <img src={person.pictureUrl} alt={person.name} className="h-full w-full object-cover" />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center font-semibold text-emerald-700">
+                          {person.avatar}
+                        </div>
+                      )}
                     </div>
                     <div>
-                      <p className="font-semibold text-slate-900">{person.name}</p>
-                      <p className="text-sm text-slate-500">{person.relationship}</p>
+                      <p className="font-semibold text-slate-900">{person.name || 'Unknown Name'}</p>
+                      <p className="text-sm text-slate-500">{person.relationship || 'Unknown Relation'}</p>
                     </div>
                   </div>
                   <p className="mt-4 text-sm text-slate-600">Last seen {timeLabel(person.lastSeenHoursAgo)}</p>
@@ -335,8 +497,14 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onSignOut }) => {
           <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
             {filteredAlerts.map((alert) => (
               <Card key={alert.id} className="p-4">
-                <div className="flex h-24 items-center justify-center rounded-lg bg-slate-100 text-2xl font-semibold text-slate-500">
-                  {alert.snapshot}
+                <div className="h-24 rounded-lg bg-slate-100 overflow-hidden">
+                  {alert.imageUrl ? (
+                    <img src={alert.imageUrl} alt="Unknown person" className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-sm text-slate-500">
+                      No image
+                    </div>
+                  )}
                 </div>
                 <p className="mt-3 text-sm text-slate-600">{timeLabel(alert.timestampHoursAgo)}</p>
                 <span className="badge-unknown mt-2 inline-flex">Pending</span>
@@ -368,8 +536,8 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onSignOut }) => {
               <Card key={person.id} className="p-5">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className="font-semibold text-slate-900">{person.name}</p>
-                    <p className="text-sm text-slate-500">{person.relationship}</p>
+                    <p className="font-semibold text-slate-900">{person.name || 'Unknown Name'}</p>
+                    <p className="text-sm text-slate-500">{person.relationship || 'Unknown Relation'}</p>
                   </div>
                   <span className="text-xs text-slate-400">{timeLabel(person.lastSeenHoursAgo)}</span>
                 </div>
@@ -477,4 +645,3 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onSignOut }) => {
 };
 
 export default Dashboard;
-
