@@ -18,7 +18,7 @@ const SignIn: React.FC<SignInProps> = ({ onBack }) => {
 
   const handleGoogleSignIn = async () => {
     if (!supabase || !isSupabaseConfigured) {
-      setError('Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.');
+      setError('Authentication service is not configured. Please contact the administrator.');
       return;
     }
 
@@ -48,7 +48,7 @@ const SignIn: React.FC<SignInProps> = ({ onBack }) => {
     event.preventDefault();
 
     if (!supabase || !isSupabaseConfigured) {
-      setError('Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.');
+      setError('Authentication service is not configured. Please contact the administrator.');
       return;
     }
 
@@ -161,7 +161,7 @@ const SignIn: React.FC<SignInProps> = ({ onBack }) => {
 
           {!isSupabaseConfigured && (
             <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-              Add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in your `.env` file.
+              Authentication service is not configured. See the project README for setup instructions.
             </div>
           )}
 
