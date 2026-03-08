@@ -1,6 +1,5 @@
 import base64
 import binascii
-from collections import OrderedDict
 
 import requests
 from flask import Flask, render_template
@@ -49,29 +48,13 @@ def base64_to_data_url(image_base64):
     return f"data:{mime_type};base64,{normalized_b64}", None
 
 
-def build_identity_label(person_id, display_name):
-    if person_id is None:
-        return "Unassigned"
-    if display_name:
-        return f"Name: {display_name}"
-    return f"Person ID: {person_id}"
-
-
-def build_event_type(person_id, match_score):
-    if person_id is None:
-        return "No person linked"
-    if match_score is None:
-        return "New person created"
-    return "Matched existing person"
-
-
 def fetch_events():
     headers = {
         "apikey": SUPABASE_KEY,
         "Authorization": f"Bearer {SUPABASE_KEY}",
     }
     params = {
-        "select": "id,timestamp,device_id,image_base64,embedding,created_at,person_id,match_score,people:person_id(id,display_name)",
+        "select": "id,timestamp,device_id,image_base64,embedding,created_at",
         "order": "created_at.desc",
     }
 
@@ -80,61 +63,35 @@ def fetch_events():
     rows = response.json()
 
     events = []
-    grouped = OrderedDict()
     for row in rows:
-        person_info = row.get("people") if isinstance(row.get("people"), dict) else {}
-        person_id = row.get("person_id")
-        display_name = person_info.get("display_name")
         image_data_url, image_error = base64_to_data_url(row.get("image_base64", ""))
-        match_score = row.get("match_score")
-
-        event = {
-            "id": row.get("id"),
-            "timestamp": row.get("timestamp"),
-            "device_id": row.get("device_id"),
-            "created_at": row.get("created_at"),
-            "person_id": person_id,
-            "display_name": display_name,
-            "match_score": match_score,
-            "event_type": build_event_type(person_id, match_score),
-            "identity_label": build_identity_label(person_id, display_name),
-            "image_data_url": image_data_url,
-            "image_error": image_error,
-        }
-        events.append(event)
-
-        group_key = str(person_id) if person_id is not None else "unassigned"
-        if group_key not in grouped:
-            grouped[group_key] = {
-                "group_label": build_identity_label(person_id, display_name),
-                "person_id": person_id,
-                "display_name": display_name,
-                "events": [],
+        events.append(
+            {
+                "id": row.get("id"),
+                "timestamp": row.get("timestamp"),
+                "device_id": row.get("device_id"),
+                "created_at": row.get("created_at"),
+                "embedding": row.get("embedding"),
+                "image_data_url": image_data_url,
+                "image_error": image_error,
             }
-        grouped[group_key]["events"].append(event)
-
-    return events, list(grouped.values())
+        )
+    return events
 
 
 @app.route("/")
 def index():
     events = []
-    grouped_events = []
     error_message = None
 
     try:
-        events, grouped_events = fetch_events()
+        events = fetch_events()
     except requests.RequestException as exc:
         error_message = f"Supabase request failed: {exc}"
     except ValueError as exc:
         error_message = f"Invalid Supabase response: {exc}"
 
-    return render_template(
-        "index.html",
-        events=events,
-        grouped_events=grouped_events,
-        error_message=error_message,
-    )
+    return render_template("index.html", events=events, error_message=error_message)
 
 
 if __name__ == "__main__":
