@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Recognition Events Viewer</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      background: #f4f6f8;
+      color: #1f2933;
+    }
+    h1 {
+      margin: 0 0 6px 0;
+    }
+    .sub {
+      margin: 0 0 18px 0;
+      color: #52606d;
+    }
+    .error {
+      background: #fee2e2;
+      border: 1px solid #ef4444;
+      color: #991b1b;
+      padding: 10px;
+      border-radius: 6px;
+      margin-bottom: 16px;
+    }
+    .group {
+      margin-bottom: 24px;
+      padding: 14px;
+      background: #ffffff;
+      border: 1px solid #d9e2ec;
+      border-radius: 8px;
+    }
+    .group-title {
+      margin: 0 0 12px 0;
+      font-size: 18px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 12px;
+    }
+    .card {
+      background: #ffffff;
+      border: 1px solid #d9e2ec;
+      border-radius: 8px;
+      padding: 10px;
+      box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
+    }
+    .meta {
+      font-size: 14px;
+      margin-bottom: 8px;
+      line-height: 1.45;
+    }
+    img {
+      width: 100%;
+      border-radius: 6px;
+      border: 1px solid #d9e2ec;
+      display: block;
+    }
+    .placeholder {
+      border: 1px dashed #9aa5b1;
+      border-radius: 6px;
+      padding: 18px;
+      text-align: center;
+      color: #52606d;
+      background: #f0f4f8;
+    }
+    .empty {
+      padding: 16px;
+      background: #ffffff;
+      border: 1px solid #d9e2ec;
+      border-radius: 8px;
+    }
+    .chip {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      background: #e4e7eb;
+      color: #334e68;
+    }
+  </style>
+</head>
+<body>
+  <h1>Recognition Events</h1>
+  <p class="sub">Grouped by person identity. Newest events first.</p>
+
+  {% if error_message %}
+    <div class="error">{{ error_message }}</div>
+  {% endif %}
+
+  {% if grouped_events %}
+    {% for group in grouped_events %}
+      <section class="group">
+        <h2 class="group-title">{{ group.group_label }}</h2>
+        <div class="grid">
+          {% for event in group.events %}
+            <article class="card">
+              <div class="meta">
+                <div><strong>Event ID:</strong> {{ event.id }}</div>
+                <div><strong>Device:</strong> {{ event.device_id or "N/A" }}</div>
+                <div><strong>Timestamp:</strong> {{ event.timestamp or "N/A" }}</div>
+                <div><strong>Created:</strong> {{ event.created_at or "N/A" }}</div>
+                <div><strong>Identity:</strong> {{ event.identity_label }}</div>
+                <div><strong>Match Score:</strong> {{ "%.3f"|format(event.match_score) if event.match_score is not none else "N/A" }}</div>
+                <div><span class="chip">{{ event.event_type }}</span></div>
+              </div>
+
+              {% if event.image_data_url %}
+                <img src="{{ event.image_data_url }}" alt="Recognition event image {{ event.id }}">
+              {% else %}
+                <div class="placeholder">
+                  Image unavailable: {{ event.image_error or "Missing or invalid image data" }}
+                </div>
+              {% endif %}
+            </article>
+          {% endfor %}
+        </div>
+      </section>
+    {% endfor %}
+  {% else %}
+    <div class="empty">No rows found in recognition_events.</div>
+  {% endif %}
+</body>
+</html>
