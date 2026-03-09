@@ -71,3 +71,8 @@ Reusable components:
 ## Mock Data
 
 During UI development, fake data is used to simulate backend responses.
+
+## Raspberry Pi Side
+
+The `raspberry-pi/` folder contains the Pi-side face detection and Supabase ingestion pipeline.
+See [`raspberry-pi/README.md`](raspberry-pi/README.md) for setup and run instructions.

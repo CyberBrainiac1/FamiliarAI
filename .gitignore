@@ -3,4 +3,7 @@ dist
 .env
 .env.local
 .env.*.local
-config.py
+/config.py
+raspberry-pi/models/
+raspberry-pi/.venv/
+raspberry-pi/latest_*.jpg
