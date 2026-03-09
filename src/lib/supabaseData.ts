@@ -26,7 +26,7 @@ export interface SaveLabeledPersonPayload {
 }
 
 const missingConfigMessage =
-  'Second Supabase is not configured. Add VITE_DATA_SUPABASE_URL and VITE_DATA_SUPABASE_ANON_KEY.';
+  'Data service is not configured. Please contact the administrator.';
 
 const getClient = (): SupabaseClient | null => {
   if (!isDataSupabaseConfigured || !dataSupabase) return null;
